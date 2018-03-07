@@ -120,8 +120,27 @@ export default class DBManager {
         return getJSON(usersPath)[cpf];
     }
 
-    static getUserExists(cpf) {
-        return Boolean(getJSON(usersPath)[cpf]);
+    static getUserExists(cpf, cb?) {
+        var err;
+        let users = getJSON(usersPath);
+        let user = users[cpf];
+        if(err) {
+            callback(cb, err);
+        } else {
+            let data = {
+                exists: false,
+                hasEmail: false,
+                registered: false
+            }
+            if(user) {
+                data.exists = true;
+                if(user.email) {
+                    data.hasEmail = true;
+                    if(user.confirmedEmail) data.registered = true
+                }
+            }
+            callback(cb, err, data);
+        }
     }
     
     static postUser(name, cpf, password, email, cb) {

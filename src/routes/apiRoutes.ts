@@ -120,7 +120,9 @@ export class ApiRoutes {
     getUserExists(req, res) {
         var cpf = req.query["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
-        res.status(200).json({exists: DBManager.getUserExists(cpf)});
+        DBManager.getUserExists(cpf, (err, data) => {
+            res.status(200).json({success: !err, err: err, exists: data.exists, hasEmail: data.hasEmail, registered: data.registered});
+        });
     }
 
     postUser(req, res) {
