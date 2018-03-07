@@ -174,7 +174,6 @@ export class ApiRoutes {
     }
 
     postLogin(req, res) {
-        console.log("body", req.body);
         var cpf = req.body["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var pass = req.body["password"] || "";
