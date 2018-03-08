@@ -129,15 +129,11 @@ export default class DBManager {
         } else {
             let data = {
                 exists: false,
-                hasEmail: false,
                 registered: false
             }
             if(user) {
                 data.exists = true;
-                if(user.email) {
-                    data.hasEmail = true;
-                    if(user.confirmedEmail) data.registered = true
-                }
+                if(user.confirmedEmail) data.registered = true
             }
             callback(cb, err, data);
         }
