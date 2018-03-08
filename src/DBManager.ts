@@ -260,7 +260,13 @@ export default class DBManager {
                 timestamp: timestamp,
                 hash: hash
             }
-            saveUsers(users, cb, hash);
+
+            let keys = user.confirmedEmail ? ["name", "cpf", "email", "address", "orders"] : ["name", "cpf"];
+            let userToSend = {};
+            userToSend = _.pickBy(user, (value, key) => {
+                return keys.indexOf(key) >= 0;
+            });
+            saveUsers(users, cb, {hash: hash, user: userToSend});
         }
     }
 

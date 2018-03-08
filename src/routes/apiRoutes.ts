@@ -179,8 +179,8 @@ export class ApiRoutes {
         var cpf = req.body["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var pass = req.body["password"] || "";
-        DBManager.postLogin(cpf, pass, (err, session) => {
-            res.status(200).json({success: !err, err: err, cpf: cpf, session: session});
+        DBManager.postLogin(cpf, pass, (err, data) => {
+            res.status(200).json({success: !err, err: err, cpf: cpf, session: data.hash, user: data.user});
         });
     }
 
