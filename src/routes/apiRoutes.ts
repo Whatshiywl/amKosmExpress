@@ -1,6 +1,6 @@
 var express = require('express');
 var Router = express.Router;
-import { DataIO } from './../DBManager';
+import * as DBManager from './../DBManager';
 
 var _ = require('lodash');
 
@@ -26,9 +26,6 @@ export class ApiRoutes {
                 p: '/order', h: this.postOrder.bind(this), m: 'POST', v: true
             },
             {
-                p: '/orderList', h: this.getOrderList.bind(this), v: true
-            },
-            {
                 p: '/user', h: this.getUser.bind(this), v: true
             },
             {
@@ -39,9 +36,6 @@ export class ApiRoutes {
             },
             {
                 p: '/sign-up-resubmit', h: this.postResubmitConfirmSignUp.bind(this), m: 'POST'
-            },
-            {
-                p: '/user-list', h: this.getUserList.bind(this), v: true
             },
             {
                 p: '/address', h: this.getAddress.bind(this), v: true
@@ -77,22 +71,23 @@ export class ApiRoutes {
         res.json({status: 'ok'});
     };
 
-    validate(req, res, next) {
+    validate(req, res, next: Function) {
         var cpf = req.query.cpf || req.body.cpf;
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var session = req.query.session || req.body.session;
-        var err = DataIO.validate(cpf, session);
-        if(err) {
-            res.status(200).json({success: false, err: err, logged: false});
-        } else {
-            if(next && typeof next == "function") next(req, res);
-        }
+        DBManager.dataIO.validate(cpf, session, err => {
+            if(err) {
+                res.status(200).json({success: false, err: err, logged: false});
+            } else {
+                next(req, res);
+            }
+        });
     }
 
     getOrder(req, res) {
         var id = req.query["id"];
-        var order = DataIO.getOrder(id);
-        res.json({order: order, logged: true});
+        // var order = DBManager.jsonIO.getOrder(id);
+        res.json({order: null, logged: true});
     }
 
     postOrder(req, res, logged) {
@@ -100,27 +95,22 @@ export class ApiRoutes {
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var products = req.body["products"];
         var address = req.body.address
-        DataIO.postOrder(cpf, products, address, (err, id) => {
+        DBManager.dataIO.postOrder(cpf, products, address, (err, id) => {
             res.status(200).json({success: !err, err: err, id: id, logged: true});
         });
-    }
-
-    getOrderList(req, res) {
-        var orders = DataIO.getOrderList();
-        res.json({orders: orders, logged: true});
     }
 
     getUser(req, res) {
         var cpf = req.query["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
-        var user = DataIO.getUser(cpf);
-        res.json({user: user, logged: true});
+        // var user = DBManager.jsonIO.getUser(cpf);
+        res.json({user: null, logged: true});
     }
 
     getUserExists(req, res) {
         var cpf = req.query["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
-        DataIO.getUserExists(cpf, (err, data) => {
+        DBManager.dataIO.getUserExists(cpf, (err, data) => {
             res.status(200).json({success: !err, err: err, exists: data.exists, registered: data.registered});
         });
     }
@@ -131,7 +121,7 @@ export class ApiRoutes {
         var email = req.body["email"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var pass = req.body["password"] || "";
-        DataIO.postUser(name, cpf, pass, email, err => {
+        DBManager.dataIO.postUser(name, cpf, pass, email, err => {
             res.status(200).json({success: !err, err: err, cpf: cpf, email: email});
         });
     }
@@ -139,19 +129,14 @@ export class ApiRoutes {
     postResubmitConfirmSignUp(req, res) {
         let cpf = req.body.cpf;
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
-        DataIO.resubmitConfirmSignUp(cpf, err => {
+        DBManager.dataIO.resubmitConfirmSignUp(cpf, err => {
             res.status(200).json({success: !err, err: err});
         });
     }
 
-    getUserList(req, res) {
-        var users = DataIO.getUserList();
-        res.json({users: users, logged: true});
-    }
-
     getAddress(req, res) {
         var cpf = req.query.cpf;
-        DataIO.getAddressByCpf(cpf, (err, address) => {
+        DBManager.jsonIO.getAddressByCpf(cpf, (err, address) => {
             res.status(200).json({success: !err, err: err, address: address, logged: true});
         });
     }
@@ -160,7 +145,7 @@ export class ApiRoutes {
         var cpf = req.body.cpf;
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var address = req.body.address;
-        DataIO.postAddress(cpf, address, err => {
+        DBManager.dataIO.postAddress(cpf, address, err => {
             res.status(200).json({success: !err, err: err, logged: true});
         });
     }
@@ -170,7 +155,7 @@ export class ApiRoutes {
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var oldPass = req.body["oldPass"] || "";
         var newPass = req.body["newPass"] || "";
-        DataIO.postChangePassword(cpf, oldPass, newPass, err => {
+        DBManager.dataIO.postChangePassword(cpf, oldPass, newPass, err => {
             res.status(200).json({success: !err, err: err});
         });
     }
@@ -179,7 +164,7 @@ export class ApiRoutes {
         var cpf = req.body["cpf"];
         cpf = cpf ? cpf.toString().replace(/[^\d]+/g,'') : "";
         var pass = req.body["password"] || "";
-        DataIO.postLogin(cpf, pass, (err, data) => {
+        DBManager.dataIO.postLogin(cpf, pass, (err, data) => {
             res.status(200).json({success: !err, err: err, cpf: cpf, session: data.hash, user: data.user});
         });
     }
