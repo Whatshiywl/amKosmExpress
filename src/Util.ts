@@ -1,7 +1,7 @@
 var sha256 = require('crypto-js/sha256');
 var lodash = require('lodash');
 
-export default class Util {
+export class Util {
 
     static validateCPF(cpf) {
         if(cpf == '') return false; 

@@ -4,49 +4,44 @@ var moment = require('moment');
 var _ = require('lodash');
 var sha256 = require('crypto-js/sha256');
 
-import User from './models/User';
-var Address = require('./models/Address');
+import { User } from './models/User';
+import { Address } from './models/Address';
 import mailerService from './mailerService';
-import Util from './Util';
+import { Util } from './Util';
 
 var dataPath = path.resolve(__dirname, "../data");
 var ordersPath = path.resolve(dataPath, "orders.json");
 var usersPath = path.resolve(dataPath, "users.json");
 var addrPath = path.resolve(dataPath, "addresses.json");
 
-function getJSON(path) {
-    var json = require(path);
-    delete require.cache[path];
-    return json;
+class DBManager {
+
+    getJSON(path) {
+        var json = require(path);
+        delete require.cache[path];
+        return json;
+    }
+    
+    saveOrders(orders, cb: (err: any) => any) {
+        fs.writeFile(ordersPath, JSON.stringify(orders, null, 4), cb);
+    }
+    
+    saveUsers(users, cb: (err: any) => any) {
+        fs.writeFile(usersPath, JSON.stringify(users, null, 4), cb);
+    }
+    
+    saveAddresses(addresses, cb: (err: any) => any) {
+        fs.writeFile(addrPath, JSON.stringify(addresses, null, 4), cb);
+    }
 }
 
-function callback(cb, err, data?) {
-    if(cb && typeof cb == "function") cb(err, data);
-}
+var dbManager = new DBManager();
 
-function saveOrders(orders, cb, data?) {
-    fs.writeFile(ordersPath, JSON.stringify(orders, null, 4), err => {
-        callback(cb, err, data);
-    });
-}
+export class DataIO {
 
-function saveUsers(users, cb, data?) {
-    fs.writeFile(usersPath, JSON.stringify(users, null, 4), err => {
-        callback(cb, err, data);
-    });
-}
-
-function saveAddresses(addresses, cb, data?) {
-    fs.writeFile(addrPath, JSON.stringify(addresses, null, 4), err => {
-        callback(cb, err, data);
-    })
-}
-
-export default class DBManager {
-
-    static validate(cpf, session, cb?) {
+    static validate(cpf, session) {
         var err;
-        var user = getJSON(usersPath)[cpf];
+        var user = dbManager.getJSON(usersPath)[cpf];
         var validate = Util.validateSession(user, session);
         if(!cpf || !session) err = "Você precisa estar logado para fazer isso";
         else if(!user) err = "Este CPF não está registrado";
@@ -58,13 +53,13 @@ export default class DBManager {
     }
 
     static getOrder(id) {
-        return getJSON(ordersPath)[id];
+        return dbManager.getJSON(ordersPath)[id];
     }
 
-    static postOrder(cpf, products, address, cb) {
+    static postOrder(cpf, products, address, cb: (err: any, id?: number) => any) {
 
         const processAndSaveOrder = (addrHash) => {
-            var orders = getJSON(ordersPath);
+            var orders = dbManager.getJSON(ordersPath);
             var todayHash = parseInt(moment().format("YYMMDD0000"));
             var todays = _.filter(Object.keys(orders), key => key >= todayHash);
             var serial = todays.length;
@@ -76,32 +71,34 @@ export default class DBManager {
                 products: products
             }
 
-            saveOrders(orders, err => {
-                if(err) callback(cb, err);
+            dbManager.saveOrders(orders, err => {
+                if(err) cb(err);
                 else {
                     var user = users[cpf];
                     if(!user.orders) user.orders = [];
                     user.orders.push(id);
-                    saveUsers(users, cb, id);
+                    dbManager.saveUsers(users, err => {
+                        cb(err, id);
+                    });
                 }
             });
         }
 
         var err;
-        var users = getJSON(usersPath);
+        var users = dbManager.getJSON(usersPath);
         var user = users[cpf];
         if(!user) err = "Este CPF não está registrado";
         else if(!address) err = "Não foi informado nenhum endereço";
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
-            var addresses = getJSON(addrPath);
-            var address = new Address(address.line1, address.line2, address.neigh, address.city, address.state, address.code);
-            var addrHash = address.getHash();
+            var addresses = dbManager.getJSON(addrPath);
+            var addressObj = new Address(address.line1, address.line2, address.neigh, address.city, address.state, address.code);
+            var addrHash = addressObj.getHash();
             if(!addresses[addrHash]) {
-                addresses[addrHash] = address;
-                saveAddresses(addresses, err => {
-                    if(err) callback(cb, err);
+                addresses[addrHash] = addressObj;
+                dbManager.saveAddresses(addresses, err => {
+                    if(err) cb(err);
                     else {
                         processAndSaveOrder(addrHash);
                     }
@@ -113,19 +110,19 @@ export default class DBManager {
     }
 
     static getOrderList() {
-        return getJSON(ordersPath);
+        return dbManager.getJSON(ordersPath);
     }
 
     static getUser(cpf) {
-        return getJSON(usersPath)[cpf];
+        return dbManager.getJSON(usersPath)[cpf];
     }
 
-    static getUserExists(cpf, cb?) {
+    static getUserExists(cpf, cb: (err: any, data?: {exists: boolean, registered: boolean}) => any) {
         var err;
-        let users = getJSON(usersPath);
+        let users = dbManager.getJSON(usersPath);
         let user = users[cpf];
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
             let data = {
                 exists: false,
@@ -135,35 +132,34 @@ export default class DBManager {
                 data.exists = true;
                 if(user.confirmedEmail) data.registered = true
             }
-            callback(cb, err, data);
+            cb(err, data);
         }
     }
     
-    static postUser(name, cpf, password, email, cb) {
-        console.log('posting user')
+    static postUser(name, cpf, password, email, cb: (err: any) => any) {
         var err;
-        var users = getJSON(usersPath);
+        var users = dbManager.getJSON(usersPath);
         password = Util.addSalt(password);
         if(!name) err = {name: "Usuário precisa de nome"};
         else if(!email) err = {email: "Usuário precisa de email"};
         else if(users[cpf]) err = {cpf: "Este CPF já foi registrado"};
         else if(!err && !Util.validateCPF(cpf)) err = {cpf: "CPF não é válido"};
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
             var user = new User(name, cpf, password, email);
             users[cpf] = user;
-            saveUsers(users, cb);
+            dbManager.saveUsers(users, cb);
             mailerService.sendConfirmSignUp(email, name, cpf, user.confirmCode);
         }
     }
 
-    static resubmitConfirmSignUp(cpf, cb?) {
+    static resubmitConfirmSignUp(cpf, cb: (err: any) => any) {
         let err;
-        let user = getJSON(usersPath)[cpf];
+        let user = dbManager.getJSON(usersPath)[cpf];
         if(!user) err = {cpf: "Este CPF não foi registrado"};
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
             let name = user.name;
             let email = user.email;
@@ -173,24 +169,24 @@ export default class DBManager {
     }
 
     static getUserList() {
-        return getJSON(usersPath);
+        return dbManager.getJSON(usersPath);
     }
 
     static getAddressByHash(hash) {
-        return getJSON(addrPath)[hash];
+        return dbManager.getJSON(addrPath)[hash];
     }
 
-    static getAddressByCpf(cpf, cb) {
+    static getAddressByCpf(cpf, cb: (err: any, address?: Address) => any) {
         var err;
-        var user = getJSON(usersPath)[cpf];
+        var user = dbManager.getJSON(usersPath)[cpf];
         if(!user) err = "Este CPF não está registrado";
-        if(!user.address) callback(cb, err, undefined);
-        else callback(cb, err, DBManager.getAddressByHash(user.address));
+        if(!user.address) cb(err);
+        else cb(err, DataIO.getAddressByHash(user.address));
     }
 
-    static postAddress(cpf, address, cb) {
+    static postAddress(cpf, address, cb: (err: any) => any) {
         var err;
-        var users = getJSON(usersPath);
+        var users = dbManager.getJSON(usersPath);
         var user = users[cpf];
         if(!user) err = "Este CPF não está registrado";
         var {
@@ -205,52 +201,52 @@ export default class DBManager {
         if(!line1 || line1.length==0 || !neigh || neigh.length==0 || !city || city.length==0 || !state || state.length==0 || !code || code.length==0)
             err = "Algum campo obrigatório não foi preenchido";
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
-            var address = new Address(line1, line2, neigh, city, state, code);
-            var addrHash = address.getHash();
-            var addr = getJSON(addrPath);
+            var addressObj = new Address(line1, line2, neigh, city, state, code);
+            var addrHash = addressObj.getHash();
+            var addr = dbManager.getJSON(addrPath);
             if(addr[addrHash]) {
                 user.address = addrHash;
-                saveUsers(users, cb);
+                dbManager.saveUsers(users, cb);
             } else {
-                addr[addrHash] = address;
-                saveAddresses(addr, err => {
-                    if(err) callback(cb, err);
+                addr[addrHash] = addressObj;
+                dbManager.saveAddresses(addr, err => {
+                    if(err) cb(err);
                     else {
                         user.address = addrHash;
-                        saveUsers(users, cb);
+                        dbManager.saveUsers(users, cb);
                     }
                 });
             }
         }
     }
 
-    static postChangePassword(cpf, oldPass, newPass, cb) {
+    static postChangePassword(cpf, oldPass, newPass, cb: (err: any) => any) {
         var err;
-        var users = getJSON(usersPath);
+        var users = dbManager.getJSON(usersPath);
         var user = users[cpf];
         oldPass = Util.addSalt(oldPass);
         newPass = Util.addSalt(newPass);
         if(!user) err = "Este CPF não está registrado";
         if(user.password && user.password !== oldPass) err = "Senha errada";
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
             user.password = newPass;
-            saveUsers(users, cb);
+            dbManager.saveUsers(users, cb);
         }
     }
 
-    static postLogin(cpf, password, cb) {
+    static postLogin(cpf, password, cb: (err: any, data?: {hash: string, user: {name: string, cpf: number, email?: string, address?: string, orders?: string[]}}) => any) {
         var err;
-        var users = getJSON(usersPath);
+        var users = dbManager.getJSON(usersPath);
         var user = users[cpf];
         password = Util.addSalt(password);
         if(!user || user.password == Util.blankPass()) err = {cpf: "Este CPF não está registrado"};
         else if(user.password && user.password !== password) err = {pass: "Senha errada"};
         if(err) {
-            callback(cb, err);
+            cb(err);
         } else {
             var timestamp = Date.now();
             var timestr = timestamp + "";
@@ -262,11 +258,12 @@ export default class DBManager {
             }
 
             let keys = user.confirmedEmail ? ["name", "cpf", "email", "address", "orders"] : ["name", "cpf"];
-            let userToSend = {};
-            userToSend = _.pickBy(user, (value, key) => {
+            let userToSend = _.pickBy(user, (value, key) => {
                 return keys.indexOf(key) >= 0;
             });
-            saveUsers(users, cb, {hash: hash, user: userToSend});
+            dbManager.saveUsers(users, err => {
+                cb(err, {hash: hash, user: userToSend});
+            });
         }
     }
 

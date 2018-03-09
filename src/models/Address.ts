@@ -1,7 +1,7 @@
 var _ = require('lodash');
 var sha256 = require('crypto-js/sha256');
 
-module.exports = class Address {
+export class Address {
     line1;
     line2;
     neigh;
