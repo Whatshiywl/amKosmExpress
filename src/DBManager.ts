@@ -1,31 +1,138 @@
-var fs = require('fs');
-var path = require('path');
-var moment = require('moment');
-var _ = require('lodash');
-var sha256 = require('crypto-js/sha256');
+import * as fs from 'fs';
+let path = require('path');
+import * as _ from 'lodash';
 
 import { User } from './models/User';
 import { Address } from './models/Address';
 import { Order } from './models/Order';
-import mailerService from './mailerService';
-import { Util } from './Util';
 
-var dataPath = path.resolve(__dirname, "../data");
-var ordersPath = path.resolve(dataPath, "orders.json");
-var usersPath = path.resolve(dataPath, "users.json");
-var addrPath = path.resolve(dataPath, "addresses.json");
+let dataPath = path.resolve(__dirname, "./data");
+let ordersPath = path.resolve(dataPath, "orders.json");
+let usersPath = path.resolve(dataPath, "users.json");
+let addrPath = path.resolve(dataPath, "addresses.json");
 
-class JsonIO {
+class DBManager {
+
+    readonly MAXFILESIZE = 1000; // in bytes
 
     files: {[path: string]: any} = {};
     queue: {[path: string]: ((err?: any, json?: any) => any)[]} = {};
 
+    constructor() {
+        this.init(['test.json'], err => {
+            if(err) console.error(err);
+            else console.log("Database init success");
+        });
+    }
+
+    init(collections: string[], callback: (err?: any) => any) {
+        fs.mkdir(dataPath, err => {
+            if(err && err.code != "EEXIST") {
+                console.error(err);
+                callback("Error creating data directory");
+            } else {
+                this.initFiles(collections, callback);
+            }
+        });
+    }
+
+    private initFiles(files: string[], callback: (err?: any) => any) {
+        let n = files.length;
+        let i = 0;
+        _.forEach(files, (file: string) => {
+            if(!_.endsWith(file, ".json")) file += ".json";
+            let filePath = path.resolve(dataPath, file);
+            this.initFile(filePath, err => {
+                if(err) { 
+                    console.error(err);
+                    callback("Database init error");
+                    return false;
+                } else i++;
+                if(i == n) callback();
+            });
+        });
+    }
+
+    private initFile(filePath: string, callback: (err?: any) => any) {
+        let paths = filePath.split(path.delimiter);
+        let file = paths[paths.length-1];
+        fs.stat(filePath, (err, stats: fs.Stats) => {
+            if(err) {
+                if(err.code == "ENOENT") {
+                    fs.writeFile(filePath, JSON.stringify({}, null, 4), err => {
+                        if(err) {
+                            console.error(err);
+                            callback("Error creating file " + file);
+                        } else callback();
+                    });
+                } else {
+                    console.error(err);
+                    callback("Error accessing file " + file);
+                }
+            } else {
+                if(stats.size > this.MAXFILESIZE) {
+                    console.warn(`${file} is too long (${stats.size} bytes). Sharding...`);
+                    this.shard(filePath, (err, files) => {
+                        if(err) {
+                            console.error(err);
+                            callback(`Error sharding ${file}`);
+                        } else if(files && files.length > 0) {
+                            this.initFiles(files, callback);
+                        } else {
+                            callback();
+                        }
+                    });
+                } else {
+                    callback();
+                }
+            }
+        });
+    }
+
+    private shard(filePath: string, callback: (err?: any, files?: string[]) => any) {
+        this.getJSON(filePath, (err, json) => {
+            if(err) {
+                console.error(err);
+                callback(err);
+            } else {
+                let folderPath = filePath.substring(0, filePath.length-5);
+                fs.mkdir(folderPath, err => {
+                    if(err && err.code != "EEXIST") { 
+                        console.error(err);
+                        callback(`Error creating folder ${folderPath}`);
+                    } else {
+                        let paths = [];
+                        let keys = Object.keys(json) as string[];
+                        _.forEach(keys, (key: string) => {
+                            let p = path.resolve(folderPath, key + ".json");
+                            fs.writeFile(p, JSON.stringify(json[key], null, 4), err => {
+                                if(err) {
+                                    console.error();
+                                    callback(`Error creating json ${key}`);
+                                    return false;
+                                } else {
+                                    paths.push(p);
+                                }
+                                if(paths.length == keys.length) {
+                                    fs.unlink(filePath, err => {
+                                        if(err) console.error(`Error deleting ${filePath}`); 
+                                        else callback(null, paths);
+                                    });
+                                }
+                            });
+                        });
+                    }
+                });
+            }
+        });
+    }
+
     private getJSON(path: string, cb: (err?: any, json?: any) => any) {
-        if(this.files[path]) {
-            if(!this.queue[path]) this.queue[path] = [cb];
-            else this.queue[path].push(cb);
-            return;
-        }
+        // if(this.files[path]) {
+        //     if(!this.queue[path]) this.queue[path] = [cb];
+        //     else this.queue[path].push(cb);
+        //     return;
+        // }
         let json = require(path);
         this.files[path] = json;
         delete require.cache[path];
@@ -189,187 +296,4 @@ class JsonIO {
     }
 }
 
-export var jsonIO = new JsonIO();
-
-class DataIO {
-
-    validate(cpf, session, cb: (err?: any) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                jsonIO.freeUsers();
-                let validate = Util.validateSession(user, session);
-                if(!cpf || !session) err = "Você precisa estar logado para fazer isso";
-                else if(!user) err = "Este CPF não está registrado";
-                else if(validate == 1) err = "Checar backend!";
-                else if(validate == 2) err = "Não existe sessão para este usuário";
-                else if(validate == 3) err = "O hash de sessão não confere";
-                else if(validate == 4) err = "A sessão expirou";
-                cb(err);
-            }
-        });
-    }
-
-    postOrder(cpf, products, address, cb: (err?: any, id?: number) => any) {
-
-        const processAndSaveOrder = (err, address) => {
-            jsonIO.getOrderList((err, orders) => {
-                let todayHash = parseInt(moment().format("YYMMDD0000"));
-                let todays = _.filter(orders, order => order >= todayHash);
-                let serial = todays.length;
-                let id = todayHash + serial;
-                let order = new Order(id, cpf, address, products);
-                jsonIO.saveOrder(order, cb);
-            });
-        }
-
-        this.getUserExists(cpf, (err, userData) => {
-            if(err) cb(err);
-            else {
-                if(!userData.exists) err = "Este CPF não está registrado";
-                else if(!address) err = "Não foi informado nenhum endereço";
-                if(err) cb(err);
-                else {
-                    let addressObj = new Address(address.line1, address.line2, address.neigh, address.city, address.state, address.code);
-                    jsonIO.saveAddress(addressObj, processAndSaveOrder);
-                }
-            }
-        });
-    }
-
-    getUserExists(cpf, cb: (err?: any, data?: {exists?: boolean, registered?: boolean}) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                jsonIO.freeUsers();
-                let data: {
-                    exists?: boolean,
-                    registered?: boolean
-                } = {}
-                if(user) {
-                    data.exists = true;
-                    if(user.confirmedEmail) data.registered = true
-                }
-                cb(err, data);
-            }
-        });
-    }
-    
-    postUser(name, cpf, password, email, cb: (err?: any) => any) {
-        this.getUserExists(cpf, (err, userData) => {
-            if(err) cb(err);
-            else {
-                password = Util.addSalt(password);
-                if(!name) err = {name: "Usuário precisa de nome"};
-                else if(!email) err = {email: "Usuário precisa de email"};
-                else if(userData.exists) err = {cpf: "Este CPF já foi registrado"};
-                else if(!err && !Util.validateCPF(cpf)) err = {cpf: "CPF não é válido"};
-                if(err) {
-                    cb(err);
-                } else {
-                    let user = new User(name, cpf, password, email);
-                    jsonIO.saveUser(user, (err, cpf) => {
-                        if(err) cb(err);
-                        else {
-                            mailerService.sendConfirmSignUp(email, name, cpf, user.confirmCode);
-                            cb();
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    resubmitConfirmSignUp(cpf, cb: (err?: any) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                jsonIO.freeUsers();
-                if(!user) err = {cpf: "Este CPF não foi registrado"};
-                if(err) {
-                    cb(err);
-                } else {
-                    let name = user.name;
-                    let email = user.email;
-                    let confirmCode = user.confirmCode;
-                    mailerService.sendConfirmSignUp(email, name, cpf, confirmCode);
-                }
-            }
-        });
-    }
-
-    postAddress(cpf, address, cb: (err?: any) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                if(!user) err = "Este CPF não está registrado";
-                var {
-                    line1,
-                    line2,
-                    neigh,
-                    city,
-                    state,
-                    code
-                } = address;
-                code = code ? code.toString().replace(/[^\d]+/g,'') : "";
-                if(!line1 || line1.length==0 || !neigh || neigh.length==0 || !city || city.length==0 || !state || state.length==0 || !code || code.length==0)
-                    err = "Algum campo obrigatório não foi preenchido";
-                if(err) {
-                    jsonIO.freeUsers();
-                    cb(err);
-                } else {
-                    var addressObj = new Address(line1, line2, neigh, city, state, code);
-                    jsonIO.saveAddress(addressObj, (err, hash) => {
-                        user.setAddress(hash);
-                        jsonIO.saveUser(user, cb);
-                    });
-                }
-            }
-        });
-    }
-
-    postChangePassword(cpf, oldPass, newPass, cb: (err?: any) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                oldPass = Util.addSalt(oldPass);
-                newPass = Util.addSalt(newPass);
-                if(!user) err = "Este CPF não está registrado";
-                if(user.password !== oldPass) err = "Senha errada";
-                if(err) {
-                    jsonIO.freeUsers();
-                    cb(err);
-                } else {
-                    user.password = newPass;
-                    jsonIO.saveUser(user, cb);
-                }
-            }
-        });
-    }
-
-    postLogin(cpf, password, cb: (err?: any, data?: {hash: string, user: {name: string, cpf: number, email?: string, address?: string, orders?: string[]}}) => any) {
-        jsonIO.getUser(cpf, (err, user) => {
-            if(err) cb(err);
-            else {
-                password = Util.addSalt(password);
-                if(!user || user.password == Util.blankPass()) err = {cpf: "Este CPF não está registrado"};
-                else if(user.password !== password) err = {pass: "Senha errada"};
-                if(err) {
-                    cb(err);
-                } else {
-                    let sessionHash = user.registerNewSession();
-                    let keys = user.confirmedEmail ? ["name", "cpf", "email", "address", "orders"] : ["name", "cpf"];
-                    let userToSend = _.pickBy(user, (value, key) => {
-                        return keys.indexOf(key) >= 0;
-                    });
-                    jsonIO.saveUser(user, err => {
-                        cb(err, {hash: sessionHash, user: userToSend});
-                    });
-                }
-            }
-        });
-    }
-
-}
-
-export var dataIO = new DataIO();
+export default new DBManager();

@@ -4,7 +4,7 @@ var path = require('path');
 export class MailerService {
 
   constructor() {
-    var pathToData = path.resolve(__dirname, '../data');
+    var pathToData = path.resolve(__dirname, './data');
     var mailConfig = require(path.resolve(pathToData, 'mailConfig.json'));
     if(!mailConfig) {
       console.error("Error loading mail api key");
