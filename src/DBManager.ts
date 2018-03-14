@@ -11,9 +11,9 @@ let ordersPath = path.resolve(dataPath, "orders.json");
 let usersPath = path.resolve(dataPath, "users.json");
 let addrPath = path.resolve(dataPath, "addresses.json");
 
-class DBManager {
+class DBManager implements Document {
 
-    readonly MAXFILESIZE = 1000; // in bytes
+    readonly MAXFILESIZE = 1*1000*1000; // in bytes
 
     files: {[path: string]: any} = {};
     queue: {[path: string]: ((err?: any, json?: any) => any)[]} = {};
@@ -138,6 +138,40 @@ class DBManager {
         delete require.cache[path];
         cb(null, json);
     }
+
+    get(key: string): Document {
+        return null;
+    }
+
+    static FolderDocument = class FolderDocument implements Document {
+
+        constructor(public readonly path: string) {}
+
+        get(key: string): Document {
+            let newPath = path.resolve(this.path, key);
+            fs.readdir(this.path, (err, files :string[]) => {
+
+            });
+            return null;
+        }
+    }
+
+    static JSONDocument = class FolderDocument implements Document {
+        json: any;
+
+        constructor(public readonly path: string) {}
+
+        get(key: string): Document {
+            let newPath = path.resolve(this.path, key);
+            fs.readdir(this.path, (err, files :string[]) => {
+                
+            });
+            return null;
+        }
+    }
+
+
+    //TO BE REMOVED
 
     private freeResource(path) {
         this.files[path] = undefined;
@@ -294,6 +328,10 @@ class DBManager {
     freeAddresses() {
         this.freeResource(addrPath);
     }
+}
+
+interface Document {
+    get: (key: string) => Document;
 }
 
 export default new DBManager();
